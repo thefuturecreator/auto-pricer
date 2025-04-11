@@ -7,7 +7,7 @@ zip_cache = pd.read_csv("zip_cache.csv")
 with open("seasonal_model.json") as f:
     seasonal_data = json.load(f)
 
-@app.get("/quote")
+app.get("/quote")
 async def get_quote(
     pickup_zip: str,
     dropoff_zip: str,

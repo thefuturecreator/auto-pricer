@@ -1,1 +1,22 @@
-<html><body><h1>Auto Pricer</h1><form>ZIP Input Form Here</form></body></html>
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Auto Pricer</title>
+</head>
+<body>
+  <h1>Instant Auto Transport Quote</h1>
+  <form action="/quote" method="get">
+    <label>Pickup ZIP: <input type="text" name="pickup_zip" required></label><br><br>
+    <label>Dropoff ZIP: <input type="text" name="dropoff_zip" required></label><br><br>
+    <label>Month (1–12): <input type="number" name="month" min="1" max="12" required></label><br><br>
+    
+    <label><input type="checkbox" name="enclosed" value="1"> Enclosed Transport</label><br>
+    <label><input type="checkbox" name="inop" value="1"> Inoperable Vehicle</label><br>
+    <label><input type="checkbox" name="classic" value="1"> Classic Vehicle (pre-1980)</label><br>
+    <label><input type="checkbox" name="heavy" value="1"> Heavy Vehicle (+1,000 lbs)</label><br>
+    <label>Number of Vehicles: <input type="number" name="vehicle_count" min="1" value="1"></label><br><br>
+
+    <button type="submit">Get Quote</button>
+  </form>
+</body>
+</html>

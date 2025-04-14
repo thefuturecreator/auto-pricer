@@ -8,10 +8,11 @@ import json
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# Load cached ZIP-to-ZIP distances
-zip_cache = pd.read_csv("zip_cache.csv")
+# Load ZIP cache and seasonal model
+zip_cache = pd.read_csv("zip_cache.csv", dtype={"pickup_zip": str, "dropoff_zip": str})
+zip_cache["pickup_zip"] = zip_cache["pickup_zip"].str.zfill(5)
+zip_cache["dropoff_zip"] = zip_cache["dropoff_zip"].str.zfill(5)
 
-# Load seasonal pricing model
 with open("seasonal_model.json") as f:
     seasonal_data = json.load(f)
 
@@ -30,28 +31,33 @@ async def get_quote(
     heavy: int = 0,
     vehicle_count: int = 1
 ):
-    # Make sure ZIPs are zero-padded strings
     pickup_zip = pickup_zip.zfill(5)
     dropoff_zip = dropoff_zip.zfill(5)
 
-    # Cast ZIPs in cache to str with leading zeroes
-    zip_cache["pickup_zip"] = zip_cache["pickup_zip"].astype(str).str.zfill(5)
-    zip_cache["dropoff_zip"] = zip_cache["dropoff_zip"].astype(str).str.zfill(5)
-
-    # Look up matching ZIP pair
+    # Match ZIP distance
     match = zip_cache[
         (zip_cache["pickup_zip"] == pickup_zip) &
         (zip_cache["dropoff_zip"] == dropoff_zip)
     ]
-    
     if match.empty:
         return JSONResponse({"error": "No ZIP match found"}, status_code=404)
-    
+
     distance = match.iloc[0]["distance_miles"]
+
+    # Use real directional seasonal data
     route_key = f"{pickup_zip[:2]}_{dropoff_zip[:2]}_{month}"
-    base_rate = seasonal_data.get(route_key, 0.55)
+    reverse_key = f"{dropoff_zip[:2]}_{pickup_zip[:2]}_{month}"
+
+    if route_key in seasonal_data:
+        base_rate = seasonal_data[route_key]
+    elif reverse_key in seasonal_data:
+        base_rate = round(seasonal_data[reverse_key] + 0.1, 3)  # upcharge for reverse route
+    else:
+        base_rate = 0.55  # fallback rate
 
     price = distance * base_rate
+
+    # Apply modifiers
     if enclosed:
         price += 300
     if inop:
@@ -67,7 +73,6 @@ async def get_quote(
         "pickup_zip": pickup_zip,
         "dropoff_zip": dropoff_zip,
         "miles": round(distance),
-        "base_rate": round(base_rate, 2),
+        "base_rate": base_rate,
         "final_price": round(price, 2)
     }
-

@@ -30,22 +30,28 @@ async def get_quote(
     heavy: int = 0,
     vehicle_count: int = 1
 ):
-    # Find ZIP-to-ZIP match
+    # Make sure ZIPs are zero-padded strings
+    pickup_zip = pickup_zip.zfill(5)
+    dropoff_zip = dropoff_zip.zfill(5)
+
+    # Cast ZIPs in cache to str with leading zeroes
+    zip_cache["pickup_zip"] = zip_cache["pickup_zip"].astype(str).str.zfill(5)
+    zip_cache["dropoff_zip"] = zip_cache["dropoff_zip"].astype(str).str.zfill(5)
+
+    # Look up matching ZIP pair
     match = zip_cache[
-        (zip_cache["pickup_zip"] == int(pickup_zip)) &
-        (zip_cache["dropoff_zip"] == int(dropoff_zip))
+        (zip_cache["pickup_zip"] == pickup_zip) &
+        (zip_cache["dropoff_zip"] == dropoff_zip)
     ]
+    
     if match.empty:
         return JSONResponse({"error": "No ZIP match found"}, status_code=404)
-
+    
     distance = match.iloc[0]["distance_miles"]
-
-    # Route key format: CA_TX_5
     route_key = f"{pickup_zip[:2]}_{dropoff_zip[:2]}_{month}"
-    base_rate = seasonal_data.get(route_key, 0.55)  # fallback rate
+    base_rate = seasonal_data.get(route_key, 0.55)
 
     price = distance * base_rate
-
     if enclosed:
         price += 300
     if inop:
@@ -64,3 +70,4 @@ async def get_quote(
         "base_rate": round(base_rate, 2),
         "final_price": round(price, 2)
     }
+

@@ -1,1 +1,101 @@
-{}
+import os
+import pandas as pd
+from collections import defaultdict
+from geopy.distance import geodesic
+import json
+
+# --- Step 1: Load Full ZIP Code Database and Build Lookup Dictionary --- #
+# Load the ZIP database (your uploaded file)
+zip_db = pd.read_csv("/mnt/data/Copy of uszips.csv")
+zip_db.columns = [c.strip().lower().replace(" ", "_") for c in zip_db.columns]
+zip_db['zip'] = zip_db['zip'].astype(str).str.zfill(5)
+
+# Create a lookup for fast coordinate retrieval
+zip_lookup = zip_db.set_index("zip")[["lat", "lng"]].to_dict("index")
+
+def compute_distance(pickup_zip, dropoff_zip):
+    """
+    Compute geodesic distance in miles between two ZIP codes.
+    Returns None if either ZIP is missing from the ZIP lookup.
+    """
+    pu = str(pickup_zip).zfill(5)
+    do = str(dropoff_zip).zfill(5)
+    if pu in zip_lookup and do in zip_lookup:
+        pu_coords = (float(zip_lookup[pu]["lat"]), float(zip_lookup[pu]["lng"]))
+        do_coords = (float(zip_lookup[do]["lat"]), float(zip_lookup[do]["lng"]))
+        return geodesic(pu_coords, do_coords).miles
+    else:
+        return None
+
+def zip_prefix(zipcode):
+    """
+    Returns the first two digits of a ZIP code (as a string, zero-padded)
+    """
+    return str(zipcode).zfill(5)[:2]
+
+# --- Step 2: Locate and Process All Dispatch CSV Files --- #
+# List all CSV files in /mnt/data that are dispatch files (ignore any that include 'uszips', 'cache', or 'model' in the filename)
+data_dir = "/mnt/data"
+csv_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) 
+             if f.endswith(".csv") and "uszips" not in f.lower() and 
+             "cache" not in f.lower() and "model" not in f.lower()]
+
+# We will aggregate price-per-mile values per route-month.
+# Key format: "<pickup_prefix>_<dropoff_prefix>_<month>"
+seasonal_data = defaultdict(list)
+
+# Process each CSV file
+for file in csv_files:
+    try:
+        df = pd.read_csv(file)
+        # Normalize column names to lowercase and replace spaces with underscores
+        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+        # We expect at least these columns to exist:
+        # "first_pickup_date", "pickup_zip", "dropoff_zip", "price_carrier_total"
+        required_cols = ["first_pickup_date", "pickup_zip", "dropoff_zip", "price_carrier_total"]
+        if not all(col in df.columns for col in required_cols):
+            continue  # Skip files without required columns
+        
+        # Parse the date and extract the month
+        df["first_pickup_date"] = pd.to_datetime(df["first_pickup_date"], errors="coerce")
+        df = df.dropna(subset=["first_pickup_date"])
+        df["month"] = df["first_pickup_date"].dt.month
+        
+        # Process each row in the file
+        for _, row in df.iterrows():
+            try:
+                # Extract price and ensure it's a float
+                price = float(row["price_carrier_total"])
+                # Get pickup and dropoff ZIPs (force to string and zero-pad)
+                pu = str(row["pickup_zip"]).zfill(5)
+                do = str(row["dropoff_zip"]).zfill(5)
+                # Compute distance using ZIP database lookup
+                distance = compute_distance(pu, do)
+                if distance is None or distance <= 0:
+                    continue  # skip if no valid distance
+                # Compute price-per-mile (ppm)
+                ppm = round(price / distance, 3)
+                # Get the month from the pickup date
+                month = int(row["month"])
+                # Form the key using the first two digits of each ZIP and the month
+                key = f"{zip_prefix(pu)}_{zip_prefix(do)}_{month}"
+                seasonal_data[key].append(ppm)
+            except Exception as ex:
+                continue
+    except Exception as ex:
+        continue
+
+# --- Step 3: Aggregate Data into Final Seasonal Model --- #
+# Only include keys where we have 3 or more entries to avoid outliers.
+final_model = {}
+for key, ppm_list in seasonal_data.items():
+    if len(ppm_list) >= 3:
+        avg_ppm = round(sum(ppm_list) / len(ppm_list), 3)
+        final_model[key] = avg_ppm
+
+# --- Step 4: Save Final Model to JSON --- #
+output_path = os.path.join(data_dir, "seasonal_model_final.json")
+with open(output_path, "w") as f:
+    json.dump(final_model, f)
+
+output_path
